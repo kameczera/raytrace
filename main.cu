@@ -5,8 +5,27 @@
 #include "vec3.cuh"
 #include "ray.cuh"
 
+__host__ __device__ double hit_sphere(const point3& center, double radius, const ray& r) {
+    vec3 oc = center - r.origin();
+    double a = dot(r.direction(), r.direction());
+    double b = -2.0 * dot(r.direction(), oc);
+    double c = dot(oc, oc) - radius * radius;
+    double discriminant = b * b - 4 * a * c;
+
+    if(discriminant < 0) {
+        return -1.0;
+    } else {
+        return (-b - std::sqrt(discriminant)) / (2.0 * a);
+    }
+}
 
 __host__ __device__ color ray_color(const ray& r) {
+    double t = hit_sphere(point3(0, 0, -1), 0.5, r);
+    if(t > 0.0) {
+        vec3 N = unit_vector(r.at(t) - vec3(0, 0, -1));
+        return 0.5 * color(N.x() + 1, N.y() + 1, N.z() + 1);
+    }
+
     vec3 unit_direction = unit_vector(r.direction());
     double a = 0.5 * (unit_direction.y() + 1.0);
     return (1.0-a)*color(1.0, 1.0, 1.0) + a*color(0.5, 0.7, 1.0);
@@ -74,7 +93,7 @@ int main() {
     std::clog << "\rAloccating memory on GPU..." << std::flush;
     cudaMalloc(&d_rgb, rgb_size);
 
-    std::clog << "\rExecuting kernel..." << std::flush;
+    std::clog << "\rExecuting kernel...        " << std::flush;
     paint_gpu<<< grid_dim, block_dim >>> (image_width, image_height, d_rgb, pixel00_loc, pixel_delta_u, pixel_delta_v, camera_center);
 
     std::clog << "\rCopying memory from GPU to CPU..." << std::flush;
