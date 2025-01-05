@@ -1,7 +1,11 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
 
-# Nome do projeto
-project(RayTrace)
+project(raytrace LANGUAGES CXX CUDA)
 
-# Adicionar o executável
-add_executable(raytrace main.cpp)
+add_executable(raytrace main.cu)
+
+set_target_properties(raytrace PROPERTIES
+    CUDA_ARCHITECTURES 86
+)
+
+set(CMAKE_BUILD_TYPE Release)
