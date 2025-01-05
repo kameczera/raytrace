@@ -143,4 +143,5 @@ C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\include\vector_function
 C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\include\vector_functions.hpp
 C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\include\vector_types.h
 C:\workspace\raytrace\color.cuh
+C:\workspace\raytrace\ray.cuh
 C:\workspace\raytrace\vec3.cuh
