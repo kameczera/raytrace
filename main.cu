@@ -1,29 +1,14 @@
-#include <iostream>
 #include <cuda_runtime.h>
 
-#include "color.cuh"
-#include "vec3.cuh"
-#include "ray.cuh"
+#include "raytrace.cuh"
+#include "hittable.cuh"
+#include "hittable_list.cuh"
+#include "sphere.cuh"
 
-__host__ __device__ double hit_sphere(const point3& center, double radius, const ray& r) {
-    vec3 oc = center - r.origin();
-    double a = dot(r.direction(), r.direction());
-    double b = -2.0 * dot(r.direction(), oc);
-    double c = dot(oc, oc) - radius * radius;
-    double discriminant = b * b - 4 * a * c;
-
-    if(discriminant < 0) {
-        return -1.0;
-    } else {
-        return (-b - std::sqrt(discriminant)) / (2.0 * a);
-    }
-}
-
-__host__ __device__ color ray_color(const ray& r) {
-    double t = hit_sphere(point3(0, 0, -1), 0.5, r);
-    if(t > 0.0) {
-        vec3 N = unit_vector(r.at(t) - vec3(0, 0, -1));
-        return 0.5 * color(N.x() + 1, N.y() + 1, N.z() + 1);
+__host__ __device__ color ray_color(const ray& r, const hittable* world) {
+    hit_record rec;
+    if(world->hit(r, 0, infinity, rec)) {
+        return 0.5 * (rec.normal + color(1, 1, 1));
     }
 
     vec3 unit_direction = unit_vector(r.direction());
@@ -31,7 +16,7 @@ __host__ __device__ color ray_color(const ray& r) {
     return (1.0-a)*color(1.0, 1.0, 1.0) + a*color(0.5, 0.7, 1.0);
 }
 
-__global__ void paint_gpu(int image_width, int image_height, int_color* d_colors, vec3 pixel00_loc, vec3 pixel_delta_u, vec3 pixel_delta_v, vec3 camera_center) {
+__global__ void paint_gpu(int image_width, int image_height, hittable_list* world, int_color* d_colors, vec3 pixel00_loc, vec3 pixel_delta_u, vec3 pixel_delta_v, vec3 camera_center) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -39,26 +24,8 @@ __global__ void paint_gpu(int image_width, int image_height, int_color* d_colors
         vec3 pixel_center = pixel00_loc + (col * pixel_delta_u) + (row * pixel_delta_v);
         vec3 ray_direction = pixel_center - camera_center;
         ray r(camera_center, ray_direction);
-        int_color pixel_color = color_to_int(ray_color(r));
+        int_color pixel_color = color_to_int(ray_color(r, world));
         d_colors[row * image_width + col] = pixel_color;
-    }
-}
-
-__host__ void paint_cpu(int image_width, int image_height, int* rgb) {
-    for (int j = 0; j < image_height; j++) {
-        for (int i = 0; i < image_width; i++) {
-            auto r = double(i) / (image_width-1);
-            auto g = double(j) / (image_height-1);
-            auto b = 0.0;
-
-            int ir = int(255.999 * r);
-            int ig = int(255.999 * g);
-            int ib = int(255.999 * b);
-
-            rgb[i * j + i] = ir;
-            rgb[i * j + i + 1] = ig;
-            rgb[i * j + i + 2] = ib;
-        }
     }
 }
 
@@ -69,6 +36,10 @@ int main() {
 
     int image_height = int(image_width / aspect_ratio);
     image_height = (image_height < 1) ? 1 : image_height;
+
+    hittable_list world;
+    world.add(make_shared<sphere>(point3(0, 0, -1), 0.5));
+    world.add(make_shared<sphere>(point3(0, -100.5, -1), 100));
 
     double focal_length = 1.0;
     double viewport_height = 2.0;
@@ -94,7 +65,7 @@ int main() {
     cudaMalloc(&d_rgb, rgb_size);
 
     std::clog << "\rExecuting kernel...        " << std::flush;
-    paint_gpu<<< grid_dim, block_dim >>> (image_width, image_height, d_rgb, pixel00_loc, pixel_delta_u, pixel_delta_v, camera_center);
+    paint_gpu<<< grid_dim, block_dim >>> (image_width, image_height, &world, d_rgb, pixel00_loc, pixel_delta_u, pixel_delta_v, camera_center);
 
     std::clog << "\rCopying memory from GPU to CPU..." << std::flush;
     cudaMemcpy(h_rgb, d_rgb, rgb_size, cudaMemcpyDeviceToHost);

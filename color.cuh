@@ -3,7 +3,7 @@
 
 #include "vec3.cuh"
 
-#include <iostream>
+#include "raytrace.cuh"
 
 using color = vec3;
 
