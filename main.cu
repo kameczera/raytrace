@@ -1,11 +1,10 @@
 #include <cuda_runtime.h>
 
 #include "raytrace.cuh"
-#include "hittable.cuh"
 #include "hittable_list.cuh"
 #include "sphere.cuh"
 
-__host__ __device__ color ray_color(const ray& r, const hittable* world) {
+__host__ __device__ color ray_color(const ray& r, hittable_list* world) {
     hit_record rec;
     if(world->hit(r, 0, infinity, rec)) {
         return 0.5 * (rec.normal + color(1, 1, 1));
@@ -37,9 +36,27 @@ int main() {
     int image_height = int(image_width / aspect_ratio);
     image_height = (image_height < 1) ? 1 : image_height;
 
-    hittable_list world;
-    world.add(make_shared<sphere>(point3(0, 0, -1), 0.5));
-    world.add(make_shared<sphere>(point3(0, -100.5, -1), 100));
+    sphere* h_spheres = (sphere*)malloc(sizeof(sphere) * 2);
+    h_spheres[0] = sphere(point3(0, 0, -1), 0.5);
+    h_spheres[1] = sphere(point3(0, -100.5, -1), 100);
+
+    sphere* d_spheres;
+    cudaMalloc(&d_spheres, 2 * sizeof(sphere));
+    cudaMemcpy(d_spheres, h_spheres, 2 * sizeof(sphere), cudaMemcpyHostToDevice);
+
+    free(h_spheres);
+
+    hittable_list h_world(d_spheres, 2);
+
+    hittable_list* d_world;
+    cudaMalloc(&d_world, sizeof(hittable_list));
+    cudaMemcpy(d_world, &h_world, sizeof(hittable_list), cudaMemcpyHostToDevice);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        fprintf(stderr, "Erro CUDA: %s\n", cudaGetErrorString(err));
+        exit(EXIT_FAILURE);
+    }
 
     double focal_length = 1.0;
     double viewport_height = 2.0;
@@ -65,10 +82,22 @@ int main() {
     cudaMalloc(&d_rgb, rgb_size);
 
     std::clog << "\rExecuting kernel...        " << std::flush;
-    paint_gpu<<< grid_dim, block_dim >>> (image_width, image_height, &world, d_rgb, pixel00_loc, pixel_delta_u, pixel_delta_v, camera_center);
+    paint_gpu<<< grid_dim, block_dim >>> (image_width, image_height, d_world, d_rgb, pixel00_loc, pixel_delta_u, pixel_delta_v, camera_center);
+    err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Failed to launch paint_gpu kernel: " << cudaGetErrorString(err) << std::endl;
+        return -1;
+    }
+
 
     std::clog << "\rCopying memory from GPU to CPU..." << std::flush;
     cudaMemcpy(h_rgb, d_rgb, rgb_size, cudaMemcpyDeviceToHost);
+    err = cudaMemcpy(h_rgb, d_rgb, rgb_size, cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+        std::cerr << "Failed to copy memory from device to host: " << cudaGetErrorString(err) << std::endl;
+        return -1;
+    }
+
 
     std::clog << "\rWriting Image .PPM format...     " << std::flush;
     std::cout << "P3\n" << image_width << ' ' << image_height << "\n255\n";
@@ -78,6 +107,8 @@ int main() {
 
     free(h_rgb);
     cudaFree(d_rgb);
+    cudaFree(d_spheres);
+    cudaFree(d_world);
 
     return 0;
 }
