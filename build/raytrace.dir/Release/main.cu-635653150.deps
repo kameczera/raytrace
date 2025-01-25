@@ -144,9 +144,11 @@ C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\include\texture_types.h
 C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\include\vector_functions.h
 C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\include\vector_functions.hpp
 C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\include\vector_types.h
+C:\workspace\raytrace\camera.cuh
 C:\workspace\raytrace\color.cuh
 C:\workspace\raytrace\hittable.cuh
 C:\workspace\raytrace\hittable_list.cuh
+C:\workspace\raytrace\interval.cuh
 C:\workspace\raytrace\ray.cuh
 C:\workspace\raytrace\raytrace.cuh
 C:\workspace\raytrace\sphere.cuh

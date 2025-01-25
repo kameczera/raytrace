@@ -14,13 +14,13 @@ class hittable_list {
         __host__ __device__ hittable_list() : spheres(nullptr), object_count(0) {}
         __host__ __device__ hittable_list(sphere* spheres, int count) : spheres(spheres), object_count(count) {}
 
-        __host__ __device__ bool hit(const ray& r, double ray_tmin, double ray_tmax, hit_record& rec) {
+        __device__ bool hit(const ray& r, interval ray_t, hit_record& rec) {
             hit_record temp_rec;
             bool hit_anything = false;
-            double closest_so_far = ray_tmax;
+            double closest_so_far = ray_t.max;
 
             for (int i = 0; i < object_count; i++) {
-                if(spheres[i].hit_sphere(r, ray_tmin, closest_so_far, temp_rec)) {
+                if(spheres[i].hit_sphere(r, interval(ray_t.min, closest_so_far), temp_rec)) {
                     hit_anything = true;
                     closest_so_far = temp_rec.t;
                     rec = temp_rec;

@@ -4,12 +4,12 @@
 #include "hittable.cuh"
 #include "raytrace.cuh"
 
-class sphere{
+class sphere {
     public:
         __host__ __device__ sphere() : center(point3(0, 0, 0)), radius(0) {}
         __host__ __device__ sphere(const point3& center, double radius) : center(center), radius(std::fmax(0, radius)) {}
 
-        __host__ __device__ bool hit_sphere(const ray& r, double ray_tmin, double ray_tmax, hit_record& rec) {
+        __device__ bool hit_sphere(const ray& r, interval ray_t, hit_record& rec) {
             vec3 oc = center - r.origin();
             double a = r.direction().length_squared();
             double h = dot(r.direction(), oc);
@@ -21,9 +21,9 @@ class sphere{
             double sqrtd = std::sqrt(discriminant);
 
             double root = (h - sqrtd) / a;
-            if(root <= ray_tmin || ray_tmax <= root) {
+            if(!ray_t.surrounds(root)) {
                 root = (h + sqrtd) / a;
-                if(root <= ray_tmin || ray_tmax <= root) return false;
+                if(!ray_t.surrounds(root)) return false;
             }
 
             rec.t = root;
