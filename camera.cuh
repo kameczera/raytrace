@@ -6,6 +6,9 @@
 #include "hittable.cuh"
 #include "sphere.cuh"
 
+#include <curand_kernel.h>
+#include <cuda_runtime.h>
+
 __device__ color ray_color(const ray& r, hittable_list* world) {
     hit_record rec;
     if(world->hit(r, interval(0, infinity), rec)) {
@@ -16,28 +19,23 @@ __device__ color ray_color(const ray& r, hittable_list* world) {
     return (1.0-a)*color(1.0, 1.0, 1.0) + a*color(0.5, 0.7, 1.0);
 }
 
-__global__ void paint_gpu(int image_width, int image_height, hittable_list* world, int_color* d_colors, vec3 pixel00_loc, vec3 pixel_delta_u, vec3 pixel_delta_v, vec3 camera_center, int samples_per_pixel) {
+__global__ void setup_rand_states(curandState* rand_state, unsigned long seed, int width, int height) {
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row < height && col < width) {
+        int id = row * width + col;
+        curand_init(seed, id, 0, &rand_state[id]);
+    }
+}
+
+__global__ void paint_gpu(int image_width, int image_height, hittable_list* world, int_color* d_colors, vec3 pixel00_loc, vec3 pixel_delta_u, vec3 pixel_delta_v, vec3 camera_center, int samples_per_pixel, curandState* rand_state) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (row >= image_height || col >= image_width) return;
 
-    __shared__ vec3 mock_values[10];
-
-    if (threadIdx.x == 0 && threadIdx.y == 0) {
-        mock_values[0] = vec3(0.123, 0.456, 0.789);
-        mock_values[1] = vec3(0.234, 0.567, 0.890);
-        mock_values[2] = vec3(0.345, 0.678, 0.901);
-        mock_values[3] = vec3(0.456, 0.789, 0.012);
-        mock_values[4] = vec3(0.567, 0.890, 0.123);
-        mock_values[5] = vec3(0.678, 0.901, 0.234);
-        mock_values[6] = vec3(0.789, 0.012, 0.345);
-        mock_values[7] = vec3(0.890, 0.123, 0.456);
-        mock_values[8] = vec3(0.901, 0.234, 0.567);
-        mock_values[9] = vec3(0.012, 0.345, 0.678);
-    }
-
-    __syncthreads();
+    curandState local_state = rand_state[row * image_width + col];
 
     double pixel_samples_scale = 1.0 / samples_per_pixel;
     vec3 pixel_center = pixel00_loc + (col * pixel_delta_u) + (row * pixel_delta_v);
@@ -46,7 +44,7 @@ __global__ void paint_gpu(int image_width, int image_height, hittable_list* worl
     color pixel_color;
 
     for (int s = 0; s < samples_per_pixel; ++s) {
-        vec3 offset = mock_values[s];
+        vec3 offset(curand_uniform(&local_state), curand_uniform(&local_state), curand_uniform(&local_state));
         vec3 pixel_sample = pixel00_loc + ((col + offset.x()) * pixel_delta_u) + ((row + offset.y()) * pixel_delta_v);
         vec3 ray_origin = camera_center;
         vec3 ray_direction = pixel_sample - ray_origin;
@@ -64,7 +62,7 @@ class camera {
         int image_width = 100;
         int samples_per_pixel = 10;
 
-        __host__ void render(const sphere* spheres) {
+        void render(const sphere* spheres) {
             initialize();
 
             sphere* d_spheres;
@@ -77,7 +75,14 @@ class camera {
             cudaMalloc(&d_world, sizeof(hittable_list));
             cudaMemcpy(d_world, &h_world, sizeof(hittable_list), cudaMemcpyHostToDevice);
 
-            dim3 block_dim(25,25,1);
+            curandState* d_rand_state;
+            cudaMalloc((void**)&d_rand_state, image_width * image_height * sizeof(curandState));
+
+            dim3 blockDim(32, 32);
+            dim3 gridDim((image_width + blockDim.x - 1) / blockDim.x, (image_height + blockDim.y - 1) / blockDim.y);
+            setup_rand_states<<<gridDim, blockDim>>>(d_rand_state, 1234, image_width, image_height);
+
+            dim3 block_dim(16,16,1);
             dim3 grid_dim((image_width + block_dim.x - 1) / block_dim.x, (image_height + block_dim.y - 1) / block_dim.y);
 
             size_t rgb_size = sizeof(color) * image_width * image_height;
@@ -91,7 +96,7 @@ class camera {
             }
 
             std::clog << "\rExecuting kernel...        " << std::flush;
-            paint_gpu<<< grid_dim, block_dim >>> (image_width, image_height, d_world, d_rgb, pixel00_loc, pixel_delta_u, pixel_delta_v, center, samples_per_pixel);
+            paint_gpu<<< grid_dim, block_dim >>> (image_width, image_height, d_world, d_rgb, pixel00_loc, pixel_delta_u, pixel_delta_v, center, samples_per_pixel, d_rand_state);
             err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Failed to launch paint_gpu kernel: " << cudaGetErrorString(err) << std::endl;

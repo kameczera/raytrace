@@ -6,6 +6,8 @@
 #include <memory>
 #include <iostream>
 #include <cstdlib>
+#include <curand_kernel.h>
+#include <cuda_runtime.h>
 
 using std::make_shared;
 using std::shared_ptr;
