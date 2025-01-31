@@ -6,6 +6,7 @@
 #include <memory>
 #include <iostream>
 #include <cstdlib>
+
 #include <curand_kernel.h>
 #include <cuda_runtime.h>
 

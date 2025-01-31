@@ -6,17 +6,22 @@
 #include "hittable.cuh"
 #include "sphere.cuh"
 
-#include <curand_kernel.h>
-#include <cuda_runtime.h>
+__device__ color ray_color(const ray& r, hittable_list* world, curandState* local_state) {
+    ray current_ray = r;
 
-__device__ color ray_color(const ray& r, hittable_list* world) {
-    hit_record rec;
-    if(world->hit(r, interval(0, infinity), rec)) {
-        return 0.5 * (rec.normal + color(1, 1, 1));
+    for (int i = 0; i < 2; i++) {
+        hit_record rec;
+        if (world->hit(current_ray, interval(0.001, infinity), rec)) {
+            vec3 direction = random_on_hemisphere(rec.normal, local_state);
+            current_ray = ray(rec.p, direction);
+        } else {
+            vec3 unit_direction = unit_vector(current_ray.direction());
+            double a = 0.5 * (unit_direction.y() + 1.0);
+            return ((1.0 - a) * color(1.0, 1.0, 1.0) + a * color(0.5, 0.7, 1.0));
+        }
     }
-    vec3 unit_direction = unit_vector(r.direction());
-    double a = 0.5 * (unit_direction.y() + 1.0);
-    return (1.0-a)*color(1.0, 1.0, 1.0) + a*color(0.5, 0.7, 1.0);
+
+    return color(0, 0, 0);  // Se atingir o limite, retorna preto
 }
 
 __global__ void setup_rand_states(curandState* rand_state, unsigned long seed, int width, int height) {
@@ -44,16 +49,17 @@ __global__ void paint_gpu(int image_width, int image_height, hittable_list* worl
     color pixel_color;
 
     for (int s = 0; s < samples_per_pixel; ++s) {
-        vec3 offset(curand_uniform(&local_state), curand_uniform(&local_state), curand_uniform(&local_state));
+        vec3 offset = random(&local_state);
         vec3 pixel_sample = pixel00_loc + ((col + offset.x()) * pixel_delta_u) + ((row + offset.y()) * pixel_delta_v);
         vec3 ray_origin = camera_center;
         vec3 ray_direction = pixel_sample - ray_origin;
         ray r(ray_origin, ray_direction);
-        pixel_color += ray_color(r, world);
+        pixel_color += ray_color(r, world, &local_state);
     }
 
     pixel_color *= pixel_samples_scale;
     d_colors[row * image_width + col] = color_to_int(pixel_color);
+    __syncthreads();
 }
 
 class camera {
@@ -97,6 +103,9 @@ class camera {
 
             std::clog << "\rExecuting kernel...        " << std::flush;
             paint_gpu<<< grid_dim, block_dim >>> (image_width, image_height, d_world, d_rgb, pixel00_loc, pixel_delta_u, pixel_delta_v, center, samples_per_pixel, d_rand_state);
+
+            cudaDeviceSynchronize();
+
             err = cudaGetLastError();
             if (err != cudaSuccess) {
                 std::cerr << "Failed to launch paint_gpu kernel: " << cudaGetErrorString(err) << std::endl;

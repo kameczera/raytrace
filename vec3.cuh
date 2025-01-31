@@ -47,6 +47,10 @@ class vec3 {
 
 using point3 = vec3;
 
+__device__ inline vec3 random(curandState* local_state) {
+    return vec3(curand_uniform(local_state), curand_uniform(local_state), curand_uniform(local_state));
+}
+
 __host__ inline std::ostream& operator<<(std::ostream& out, const vec3& v) {
     return out << v.e[0] << ' ' << v.e[1] << ' ' << v.e[2];
 }
@@ -89,6 +93,19 @@ __host__ __device__ inline vec3 cross(const vec3& u, const vec3& v) {
 
 __host__ __device__ inline vec3 unit_vector(const vec3& v) {
     return v / v.length();
+}
+
+__device__ inline vec3 random_unit_vector(curandState* local_state) {
+    vec3 v;
+    do {
+        v = 2.0f * random(local_state) - vec3(1, 1, 1);
+    } while (v.length_squared() >= 1.0f);
+    return v;
+}
+
+__device__ inline vec3 random_on_hemisphere(const vec3& normal, curandState* local_state) {
+    vec3 on_unit_sphere = random_unit_vector(local_state);
+    return (dot(on_unit_sphere, normal) > 0.0) ? on_unit_sphere : -on_unit_sphere;
 }
 
 #endif
