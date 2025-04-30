@@ -43,6 +43,11 @@ class vec3 {
     __host__ __device__ double length_squared() const {
         return e[0]*e[0] + e[1]*e[1] + e[2]*e[2];
     }
+
+    __host__ __device__ bool near_zero() {
+        int s = 1e-8;
+        return (std::fabs(e[0]) < s) && (std::fabs(e[1]) < s) && (std::fabs(e[2]) < s);
+    }
 };
 
 using point3 = vec3;
@@ -106,6 +111,10 @@ __device__ inline vec3 random_unit_vector(curandState* local_state) {
 __device__ inline vec3 random_on_hemisphere(const vec3& normal, curandState* local_state) {
     vec3 on_unit_sphere = random_unit_vector(local_state);
     return (dot(on_unit_sphere, normal) > 0.0) ? on_unit_sphere : -on_unit_sphere;
+}
+
+__device__ inline vec3 reflect(const vec3& v, const vec3& n) {
+    return v - 2*dot(v,n)*n;
 }
 
 #endif

@@ -5,23 +5,49 @@
 #include "hittable_list.cuh"
 #include "hittable.cuh"
 #include "sphere.cuh"
+#include "material.cuh"
 
-__device__ color ray_color(const ray& r, hittable_list* world, curandState* local_state) {
-    ray current_ray = r;
+__device__ color ray_color(const ray& r_in, hittable_list* world, int max_depth, curandState* local_state) {
+    ray current_ray = r_in;
+    color accumulated_attenuation = color(1.0, 1.0, 1.0);
 
-    for (int i = 0; i < 2; i++) {
+    for (int depth = 0; depth < max_depth; ++depth) {
         hit_record rec;
         if (world->hit(current_ray, interval(0.001, infinity), rec)) {
-            vec3 direction = random_on_hemisphere(rec.normal, local_state);
-            current_ray = ray(rec.p, direction);
+            ray scattered;
+            color attenuation;
+
+            bool did_scatter = false;
+            switch (rec.mat) {
+                case LAMBERTIAN: {
+                    lambertian mat(color(0.8, 0.3, 0.3)); // exemplo fixo
+                    did_scatter = mat.scatter(current_ray, rec, attenuation, scattered, local_state);
+                    break;
+                }
+                case METAL: {
+                    metal mat(color(0.8, 0.8, 0.8)); // exemplo fixo
+                    did_scatter = mat.scatter(current_ray, rec, attenuation, scattered, local_state);
+                    break;
+                }
+                default:
+                    return color(0, 0, 0); // material desconhecido ou ausente
+            }
+
+            if (did_scatter) {
+                accumulated_attenuation = accumulated_attenuation * attenuation;
+                current_ray = scattered;
+            } else {
+                return color(0, 0, 0);
+            }
         } else {
             vec3 unit_direction = unit_vector(current_ray.direction());
             double a = 0.5 * (unit_direction.y() + 1.0);
-            return ((1.0 - a) * color(1.0, 1.0, 1.0) + a * color(0.5, 0.7, 1.0));
+            color background = (1.0 - a) * color(1.0, 1.0, 1.0) + a * color(0.5, 0.7, 1.0);
+            return accumulated_attenuation * background;
         }
     }
 
-    return color(0, 0, 0);
+    return color(0, 0, 0); // atingiu max_depth
 }
 
 __global__ void setup_rand_states(curandState* rand_state, unsigned long seed, int width, int height) {
@@ -54,7 +80,7 @@ __global__ void paint_gpu(int image_width, int image_height, hittable_list* worl
         vec3 ray_origin = camera_center;
         vec3 ray_direction = pixel_sample - ray_origin;
         ray r(ray_origin, ray_direction);
-        pixel_color += ray_color(r, world, &local_state);
+        pixel_color += ray_color(r, world, 2, &local_state);
     }
 
     pixel_color *= pixel_samples_scale;

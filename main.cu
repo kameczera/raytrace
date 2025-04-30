@@ -4,13 +4,14 @@
 #include "hittable_list.cuh"
 #include "sphere.cuh"
 #include "camera.cuh"
+#include "material.cuh"
 
 int main() {
     hittable_list world;
 
     sphere* spheres = (sphere*)malloc(sizeof(sphere) * 2);
-    spheres[0] = sphere(point3(0, 0, -1), 0.5);
-    spheres[1] = sphere(point3(0, -100.5, -1), 100);
+    spheres[0] = sphere(point3(0, 0, -1), 0.5, LAMBERTIAN);
+    spheres[1] = sphere(point3(0, -100.5, -1), 100, LAMBERTIAN);
 
     camera cam;
 
