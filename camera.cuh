@@ -21,7 +21,7 @@ __device__ color ray_color(const ray& r, hittable_list* world, curandState* loca
         }
     }
 
-    return color(0, 0, 0);  // Se atingir o limite, retorna preto
+    return color(0, 0, 0);
 }
 
 __global__ void setup_rand_states(curandState* rand_state, unsigned long seed, int width, int height) {
@@ -66,7 +66,7 @@ class camera {
     public:
         double aspect_ratio = 1.0;
         int image_width = 100;
-        int samples_per_pixel = 10;
+        int samples_per_pixel = 1000;
 
         void render(const sphere* spheres) {
             initialize();
