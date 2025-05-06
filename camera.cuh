@@ -1,6 +1,8 @@
 #ifndef CAMERA_H
 #define CAMERA_H
 
+#include <chrono>
+
 #include "raytrace.cuh"
 #include "hittable_list.cuh"
 #include "hittable.cuh"
@@ -20,17 +22,20 @@ __device__ color ray_color(const ray& r_in, hittable_list* world, int max_depth,
             bool did_scatter = false;
             switch (rec.mat) {
                 case LAMBERTIAN: {
-                    lambertian mat(color(0.8, 0.3, 0.3)); // exemplo fixo
+                    lambertian mat(rec.col);
                     did_scatter = mat.scatter(current_ray, rec, attenuation, scattered, local_state);
                     break;
                 }
                 case METAL: {
-                    metal mat(color(0.8, 0.8, 0.8)); // exemplo fixo
+                    metal mat(rec.col, rec.fuzz);
                     did_scatter = mat.scatter(current_ray, rec, attenuation, scattered, local_state);
                     break;
                 }
+                case DIELECTRIC:
+                    dielectric mat(rec.refraction);
+                    did_scatter = mat.scatter(current_ray, rec, attenuation, scattered, local_state);
                 default:
-                    return color(0, 0, 0); // material desconhecido ou ausente
+                    return color(0, 0, 0);
             }
 
             if (did_scatter) {
@@ -47,7 +52,7 @@ __device__ color ray_color(const ray& r_in, hittable_list* world, int max_depth,
         }
     }
 
-    return color(0, 0, 0); // atingiu max_depth
+    return color(0, 0, 0);
 }
 
 __global__ void setup_rand_states(curandState* rand_state, unsigned long seed, int width, int height) {
@@ -80,7 +85,7 @@ __global__ void paint_gpu(int image_width, int image_height, hittable_list* worl
         vec3 ray_origin = camera_center;
         vec3 ray_direction = pixel_sample - ray_origin;
         ray r(ray_origin, ray_direction);
-        pixel_color += ray_color(r, world, 2, &local_state);
+        pixel_color += ray_color(r, world, 50, &local_state);
     }
 
     pixel_color *= pixel_samples_scale;
@@ -92,71 +97,77 @@ class camera {
     public:
         double aspect_ratio = 1.0;
         int image_width = 100;
-        int samples_per_pixel = 1000;
+        int samples_per_pixel = 100;
 
-        void render(const sphere* spheres) {
+        void render(const sphere* spheres, int len_spheres) {
             initialize();
-
+        
+            auto start_total = std::chrono::high_resolution_clock::now();
+        
+            auto t1 = std::chrono::high_resolution_clock::now();
+            std::clog << "\rAloccating memory on GPU..." << std::flush;
             sphere* d_spheres;
-            cudaMalloc(&d_spheres, 2 * sizeof(sphere));
-            cudaMemcpy(d_spheres, spheres, 2 * sizeof(sphere), cudaMemcpyHostToDevice);
-
-            hittable_list h_world(d_spheres, 2);
-
+            cudaMalloc(&d_spheres, len_spheres * sizeof(sphere));
+            cudaMemcpy(d_spheres, spheres, len_spheres * sizeof(sphere), cudaMemcpyHostToDevice);
+            auto t2 = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> duration_alloc = t2 - t1;
+        
+            hittable_list h_world(d_spheres, len_spheres);
             hittable_list* d_world;
             cudaMalloc(&d_world, sizeof(hittable_list));
             cudaMemcpy(d_world, &h_world, sizeof(hittable_list), cudaMemcpyHostToDevice);
-
+        
             curandState* d_rand_state;
             cudaMalloc((void**)&d_rand_state, image_width * image_height * sizeof(curandState));
-
+        
             dim3 blockDim(32, 32);
             dim3 gridDim((image_width + blockDim.x - 1) / blockDim.x, (image_height + blockDim.y - 1) / blockDim.y);
             setup_rand_states<<<gridDim, blockDim>>>(d_rand_state, 1234, image_width, image_height);
-
+        
             dim3 block_dim(16,16,1);
             dim3 grid_dim((image_width + block_dim.x - 1) / block_dim.x, (image_height + block_dim.y - 1) / block_dim.y);
-
+        
             size_t rgb_size = sizeof(color) * image_width * image_height;
             int_color* d_rgb;
             int_color* h_rgb = (int_color*)malloc(rgb_size);
-            std::clog << "\rAloccating memory on GPU..." << std::flush;
-            cudaMalloc(&d_rgb, rgb_size);
-            cudaError_t err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                std::cerr << "Failed to allocate memory: " << cudaGetErrorString(err) << std::endl;
-            }
-
+        
+            auto t3 = std::chrono::high_resolution_clock::now();
             std::clog << "\rExecuting kernel...        " << std::flush;
+            cudaMalloc(&d_rgb, rgb_size);
             paint_gpu<<< grid_dim, block_dim >>> (image_width, image_height, d_world, d_rgb, pixel00_loc, pixel_delta_u, pixel_delta_v, center, samples_per_pixel, d_rand_state);
-
             cudaDeviceSynchronize();
-
-            err = cudaGetLastError();
-            if (err != cudaSuccess) {
-                std::cerr << "Failed to launch paint_gpu kernel: " << cudaGetErrorString(err) << std::endl;
-            }
-
-
+            auto t4 = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> duration_kernel = t4 - t3;
+        
+            auto t5 = std::chrono::high_resolution_clock::now();
             std::clog << "\rCopying memory from GPU to CPU..." << std::flush;
             cudaMemcpy(h_rgb, d_rgb, rgb_size, cudaMemcpyDeviceToHost);
-            err = cudaMemcpy(h_rgb, d_rgb, rgb_size, cudaMemcpyDeviceToHost);
-            if (err != cudaSuccess) {
-                std::cerr << "Failed to copy memory from device to host: " << cudaGetErrorString(err) << std::endl;
-            }
-
-
+            auto t6 = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> duration_copy = t6 - t5;
+        
+            auto t7 = std::chrono::high_resolution_clock::now();
             std::clog << "\rWriting Image .PPM format...     " << std::flush;
-
             std::cout << "P3\n" << image_width << " " << image_height << "\n255\n";
             for (int i = 0; i < image_width * image_height; i++) {
                 write_color(std::cout, h_rgb[i]);
             }
-
+            auto t8 = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> duration_output = t8 - t7;
+        
             free(h_rgb);
             cudaFree(d_rgb);
             cudaFree(d_spheres);
             cudaFree(d_world);
+        
+            auto end_total = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> duration_total = end_total - start_total;
+        
+            std::clog << "\n\n--- TEMPOS DE EXECUÇÃO ---\n";
+            std::clog << "Alocação GPU:             " << duration_alloc.count() << " s\n";
+            std::clog << "Execução kernel:          " << duration_kernel.count() << " s\n";
+            std::clog << "Cópia GPU -> CPU:         " << duration_copy.count() << " s\n";
+            std::clog << "Escrita imagem:           " << duration_output.count() << " s\n";
+            std::clog << "Tempo total:              " << duration_total.count() << " s\n";
         }
 
     private:
