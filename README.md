@@ -31,12 +31,12 @@ The project follows the 13 chapters of *Ray Tracing in One Weekend*. Below is a 
 - [x] 5. Surface Normals and Multiple Objects
 - [x] 6. Antialiasing
 - [x] 7. Diffuse Materials
-- [ ] 8. Metal
-- [ ] 9. Dielectrics
-- [ ] 10. Positionable Camera
-- [ ] 11. Defocus Blur
-- [ ] 12. Bounding Volume Hierarchies
-- [ ] 13. Final Render
+- [x] 8. Metal
+- [x] 9. Dielectrics
+- [x] 10. Positionable Camera
+- [x] 11. Defocus Blur
+- [x] 12. Bounding Volume Hierarchies
+- [x] 13. Final Render
 
 ## Current Render
 
