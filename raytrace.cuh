@@ -14,9 +14,9 @@ using std::make_shared;
 using std::shared_ptr;
 
 __device__ const double infinity = std::numeric_limits<double>::infinity();
-const double pi = 3.1415926535897932385;
+__device__ const double pi = 3.1415926535897932385;
 
-__device__ inline double degrees_to_radians(double degrees) {
+__host__ __device__ inline double degrees_to_radians(double degrees) {
     return degrees * pi / 180.0;
 }
 

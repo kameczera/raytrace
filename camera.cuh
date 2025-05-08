@@ -34,6 +34,7 @@ __device__ color ray_color(const ray& r_in, hittable_list* world, int max_depth,
                 case DIELECTRIC:
                     dielectric mat(rec.refraction);
                     did_scatter = mat.scatter(current_ray, rec, attenuation, scattered, local_state);
+                    break;
                 default:
                     return color(0, 0, 0);
             }
@@ -65,7 +66,12 @@ __global__ void setup_rand_states(curandState* rand_state, unsigned long seed, i
     }
 }
 
-__global__ void paint_gpu(int image_width, int image_height, hittable_list* world, int_color* d_colors, vec3 pixel00_loc, vec3 pixel_delta_u, vec3 pixel_delta_v, vec3 camera_center, int samples_per_pixel, curandState* rand_state) {
+__device__ point3 defocus_disk_sample(vec3 camera_center, curandState* rand_state, vec3 defocus_disk_u, vec3 defocus_disk_v) {
+    auto p = random_in_unit_disk(rand_state);
+    return camera_center + (p[0] * defocus_disk_u) + (p[1] * defocus_disk_v);
+}
+
+__global__ void paint_gpu(int image_width, int image_height, hittable_list* world, int_color* d_colors, vec3 pixel00_loc, vec3 pixel_delta_u, vec3 pixel_delta_v, vec3 camera_center, int samples_per_pixel, curandState* rand_state, double defocus_angle, vec3 defocus_disk_u, vec3 defocus_disk_v, int max_depth) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -82,10 +88,10 @@ __global__ void paint_gpu(int image_width, int image_height, hittable_list* worl
     for (int s = 0; s < samples_per_pixel; ++s) {
         vec3 offset = random(&local_state);
         vec3 pixel_sample = pixel00_loc + ((col + offset.x()) * pixel_delta_u) + ((row + offset.y()) * pixel_delta_v);
-        vec3 ray_origin = camera_center;
+        vec3 ray_origin = (defocus_angle <= 0) ? camera_center : defocus_disk_sample(camera_center, rand_state, defocus_disk_u, defocus_disk_v);
         vec3 ray_direction = pixel_sample - ray_origin;
         ray r(ray_origin, ray_direction);
-        pixel_color += ray_color(r, world, 50, &local_state);
+        pixel_color += ray_color(r, world, max_depth, &local_state);
     }
 
     pixel_color *= pixel_samples_scale;
@@ -98,6 +104,13 @@ class camera {
         double aspect_ratio = 1.0;
         int image_width = 100;
         int samples_per_pixel = 100;
+        double vfov = 90;
+        point3 lookfrom = point3(0,0,0);
+        point3 lookat = point3(0,0,-1);
+        vec3 vup = vec3(0,1,0);
+        double defocus_angle = 0;
+        double focus_dist = 10;
+        int max_depth = 50;
 
         void render(const sphere* spheres, int len_spheres) {
             initialize();
@@ -134,7 +147,7 @@ class camera {
             auto t3 = std::chrono::high_resolution_clock::now();
             std::clog << "\rExecuting kernel...        " << std::flush;
             cudaMalloc(&d_rgb, rgb_size);
-            paint_gpu<<< grid_dim, block_dim >>> (image_width, image_height, d_world, d_rgb, pixel00_loc, pixel_delta_u, pixel_delta_v, center, samples_per_pixel, d_rand_state);
+            paint_gpu<<< grid_dim, block_dim >>> (image_width, image_height, d_world, d_rgb, pixel00_loc, pixel_delta_u, pixel_delta_v, center, samples_per_pixel, d_rand_state, defocus_angle, defocus_disk_u, defocus_disk_v, max_depth);
             cudaDeviceSynchronize();
             auto t4 = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> duration_kernel = t4 - t3;
@@ -177,6 +190,9 @@ class camera {
         point3 pixel00_loc;
         vec3 pixel_delta_u;
         vec3 pixel_delta_v;
+        vec3 u, v, w;
+        vec3   defocus_disk_u;
+        vec3   defocus_disk_v; 
 
         __host__ void initialize() {
             image_height = int(image_width / aspect_ratio);
@@ -184,19 +200,28 @@ class camera {
 
             pixel_samples_scale = 1.0 / samples_per_pixel;
 
-            double focal_length = 1.0;
-            double viewport_height = 2.0;
+            center = lookfrom;
+
+            double theta = degrees_to_radians(vfov);
+            double h = std::tan(theta/2);
+            double viewport_height = 2 * h * focus_dist;
             double viewport_width = viewport_height * (double(image_width) / image_height);
-            center = point3(0, 0, 0);
 
-            vec3 viewport_u = vec3(viewport_width, 0, 0);
-            vec3 viewport_v = vec3(0,-viewport_height, 0);
+            w = unit_vector(lookfrom - lookat);
+            u = unit_vector(cross(vup, w));
+            v = cross(w, u);
 
+            vec3 viewport_u = viewport_width * u;
+            vec3 viewport_v = viewport_width * -v;
+            
             pixel_delta_u = viewport_u / image_width;
             pixel_delta_v = viewport_v / image_height;
 
-            vec3 viewport_upper_left = center - vec3(0, 0, focal_length) - viewport_u / 2 - viewport_v / 2;
+            vec3 viewport_upper_left = center - (focus_dist * w) - viewport_u / 2 - viewport_v / 2;
             pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
+            double defocus_radius = focus_dist * std::tan(degrees_to_radians(defocus_angle / 2));
+            defocus_disk_u = u * defocus_radius;
+            defocus_disk_v = v * defocus_radius;
         }
 };
 
