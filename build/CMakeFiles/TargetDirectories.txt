@@ -1,3 +1,0 @@
-C:/workspace/raytrace/build/CMakeFiles/raytrace.dir
-C:/workspace/raytrace/build/CMakeFiles/ALL_BUILD.dir
-C:/workspace/raytrace/build/CMakeFiles/ZERO_CHECK.dir
